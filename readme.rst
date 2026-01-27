@@ -178,7 +178,7 @@ Running via docker
 - ``$ cd Poker``
 - ``$ docker compose up -d``
 - ``$ xhost local:root # This permits the root user on the local machine to connect to X windows display``
-- ``$ docker-compose exec app python3 main.py # once the container is running you can launch the bot with this command``
+- ``$ docker compose exec app python3 main.py # once the container is running you can launch the bot with this command``
 
 Running via python source code
 ------------------------------
