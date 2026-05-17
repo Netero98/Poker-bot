@@ -41,10 +41,12 @@ class Curvefitting:
             pw = params['pw'].value
             adj1 = params['adj1'].value
             adj2 = params['adj2'].value
+            x = np.asarray(x, dtype=float)
             model = adj1 * np.power(x + adj2, pw)
             return model - data
 
         def finalFunction(x, adj1, adj2, pw, start, end, smallBlind):
+            x = np.asarray(x, dtype=float)
             y = adj1 * np.power(x + adj2, pw)
             y[x < start] = smallBlind
             y[x > maxEquity] = 0
