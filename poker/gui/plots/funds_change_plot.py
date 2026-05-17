@@ -16,8 +16,7 @@ class FundsChangePlot(FigureCanvas):
         self.ui_analyser.vLayout_fundschange.insertWidget(1, self)
 
     def drawfigure(self, my_computer_only):
-        LogFilename = 'log'
-        L = GameLogger(LogFilename)
+        L = GameLogger()
         p_name = str(self.ui_analyser.combobox_strategy.currentText())
         data = L.get_fundschange_chart(p_name, my_computer_only)
         self.fig.clf()

@@ -1,41 +1,44 @@
 import datetime
 import json
+import logging
 import os
 import threading
 from collections.abc import Iterable
 
 import pandas as pd
-import requests
-from fastapi.encoders import jsonable_encoder
 
-from poker.tools.helper import COMPUTER_NAME, get_config
+from poker.tools.helper import COMPUTER_NAME, get_dir
 from poker.tools.mongo_manager import MongoManager
 from poker.tools.singleton import Singleton
 
-config = get_config()
-URL = config.config.get('main', 'db')
+log = logging.getLogger(__name__)
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+LOG_DIR = os.path.join(_PROJECT_ROOT, 'log', 'games')
+
+
+def _ensure_log_dir():
+    os.makedirs(LOG_DIR, exist_ok=True)
 
 
 class GameLogger(metaclass=Singleton):
-    def __init__(self):
-        self.d = {}  # TODO: refactor it
+    def __init__(self, *args, **kwargs):
+        self.d = {}
         self.FinalDataFrame = None
 
     def isIterable(self, x):
-        # use str instead of basestring if Python3
         if isinstance(x, Iterable) and not isinstance(x, str):
             return x
         return [x]
 
     def get_played_strategy_list(self):
-        config = get_config()
-        login = config.config.get('main', 'login')
-        password = config.config.get('main', 'password')
-        response = requests.post(
-            URL + "get_played_strategy_list", params={"login": login,
-                                                      "password": password,
-                                                      "computer_name": COMPUTER_NAME})
-        return response.json()
+        strategies_dir = os.path.join(get_dir('codebase'), 'data', 'strategies')
+        result = []
+        if os.path.exists(strategies_dir):
+            for fname in os.listdir(strategies_dir):
+                if fname.startswith('strategy_') and fname.endswith('.json'):
+                    result.append(fname[len('strategy_'):-len('.json')].replace('_', ' '))
+        return result
 
     def write_log_file(self, p, h, t, d):
         hDict = {}
@@ -54,7 +57,7 @@ class GameLogger(metaclass=Singleton):
             if len(" ".join(str(ele) for ele in self.isIterable(val))) < 20:
                 dDict[key] = " ".join(str(ele) for ele in self.isIterable(val))
 
-        pDict['computername'] = os.environ['COMPUTERNAME']
+        pDict['computername'] = COMPUTER_NAME
 
         Dh = pd.DataFrame(hDict, index=[0])
         Dt = pd.DataFrame(tDict, index=[0])
@@ -64,13 +67,15 @@ class GameLogger(metaclass=Singleton):
         self.FinalDataFrame = pd.concat([Dd, Dt, Dh, Dp], axis=1)
         rec = self.FinalDataFrame.to_dict('records')[0]
         rec['other_players'] = t.other_players
-        rec['logging_timestamp'] = datetime.datetime.utcnow()
-        del rec['logger']
-        response = requests.post(
-            URL + "insert_round", json={'rec': json.dumps(rec, default=str)})
+        rec['logging_timestamp'] = str(datetime.datetime.utcnow())
+        if 'logger' in rec:
+            del rec['logger']
+
+        t_log_db = threading.Thread(name='write_log', target=self._write_round_log, args=[rec])
+        t_log_db.daemon = True
+        t_log_db.start()
 
     def mark_last_game(self, t, h, p):
-        # updates the last game after it becomes know if it was won or lost
         outcome = "na"
         if t.myFundsChange > 0:
             outcome = "Won"
@@ -84,21 +89,18 @@ class GameLogger(metaclass=Singleton):
             outcome = "Neutral"
             h.totalGames += 1
         if h.histGameStage != '':
-
             summary_dict = {'rounds': []}
-            i = 0
             mongo = MongoManager()
             rounds = mongo.get_rounds(h.lastGameID)
-            for _round in rounds:
+            for i, _round in enumerate(rounds):
                 round_name_value = {
                     'round_number': str(i),
                     'round_values': _round
                 }
                 summary_dict['rounds'].append(round_name_value)
-                i += 1
 
             summary_dict['GameID'] = h.lastGameID
-            summary_dict['ComputerName'] = os.environ['COMPUTERNAME']
+            summary_dict['ComputerName'] = COMPUTER_NAME
             summary_dict['logging_timestamp'] = str(datetime.datetime.now())
             summary_dict['FinalOutcome'] = outcome
             summary_dict['FinalStage'] = h.histGameStage
@@ -111,97 +113,138 @@ class GameLogger(metaclass=Singleton):
             summary_dict['ip'] = t.ip
 
             if abs(t.myFundsChange) <= float(p.selected_strategy['max_abs_fundchange']):
-                t_write_db = threading.Thread(name='write_mongo', target=self.insert_log,
-                                              args=[summary_dict])
+                t_write_db = threading.Thread(name='write_mongo', target=self._write_game_log, args=[summary_dict])
                 t_write_db.daemon = True
                 t_write_db.start()
-                # result = self.mongodb.games.insert_one(summary_dict)
 
-    def insert_log(self, rec):
-        response = requests.post(
-            URL + "insert_games", json={'rec': json.dumps(rec)})
+    def _write_round_log(self, rec):
+        _ensure_log_dir()
+        filepath = os.path.join(LOG_DIR, f"rounds_{datetime.date.today()}.jsonl")
+        try:
+            with open(filepath, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(rec, default=str) + '\n')
+        except Exception as e:
+            log.error(f"Failed to write round log: {e}")
+
+    def _write_game_log(self, rec):
+        _ensure_log_dir()
+        filepath = os.path.join(LOG_DIR, f"games_{datetime.date.today()}.jsonl")
+        try:
+            # Convert non-serializable types before writing
+            safe_rec = {}
+            for k, v in rec.items():
+                try:
+                    json.dumps(v, default=str)
+                    safe_rec[k] = v
+                except (TypeError, ValueError):
+                    safe_rec[k] = str(v)
+            with open(filepath, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(safe_rec, default=str) + '\n')
+        except Exception as e:
+            log.error(f"Failed to write game log: {e}")
 
     def insert_collusion(self, rec):
-        response = requests.post(
-            URL + "insert_collusion", params=jsonable_encoder(rec))
+        _ensure_log_dir()
+        filepath = os.path.join(LOG_DIR, f"collusion_{datetime.date.today()}.jsonl")
+        try:
+            with open(filepath, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(rec, default=str) + '\n')
+        except Exception as e:
+            log.error(f"Failed to write collusion log: {e}")
 
     def upload_collusion_data(self, gamenumber, mycards, p, gamestage):
-        package = {'gamenumber': gamenumber, 'cards': mycards, 'computername': os.environ['COMPUTERNAME'],
-                   'strategy': p.current_strategy, 'timestamp': datetime.datetime.utcnow(), 'gamestage': gamestage}
+        package = {'gamenumber': gamenumber, 'cards': str(mycards), 'computername': COMPUTER_NAME,
+                   'strategy': p.current_strategy, 'timestamp': str(datetime.datetime.utcnow()), 'gamestage': gamestage}
         t_write_db = threading.Thread(
             name='write_collusion', target=self.insert_collusion, args=[package])
         t_write_db.daemon = True
         t_write_db.start()
 
     def get_collusion_cards(self, gamenumber, gamestage):
-        computername = os.environ['COMPUTERNAME']
-        response = requests.post(URL + "get_collusion_cards", params={'gamenumber': gamenumber, 'gamestage': gamestage,
-                                                                      'computrname': computername}).json()
-        return response['collusion_cards'], response['player_dropped_out']
+        return '', False
+
+    def _load_local_games(self, strategy=None):
+        _ensure_log_dir()
+        all_records = []
+        for fname in sorted(os.listdir(LOG_DIR)):
+            if not fname.startswith('games_') or not fname.endswith('.jsonl'):
+                continue
+            filepath = os.path.join(LOG_DIR, fname)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            if strategy is None or rec.get('Template') == strategy:
+                                all_records.append(rec)
+                        except json.JSONDecodeError:
+                            continue
+            except Exception:
+                continue
+        return all_records
+
+    def _load_local_rounds(self):
+        _ensure_log_dir()
+        all_records = []
+        for fname in sorted(os.listdir(LOG_DIR)):
+            if not fname.startswith('rounds_') or not fname.endswith('.jsonl'):
+                continue
+            filepath = os.path.join(LOG_DIR, fname)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            all_records.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            except Exception:
+                continue
+        return all_records
 
     def get_stacked_bar_data(self, p_name, p_value, chartType, last_stage='All', last_action='All'):
-
-        response = requests.post(URL + "get_stacked_bar_data",
-                                 params={'p_value': p_value, 'chartType': chartType,
-                                         'last_stage': last_stage,
-                                         'last_action': last_action}).json()
-        data = json.loads(response['d'])
-        k = data.keys()
-        v = data.values()
-        k1 = [eval(i) for i in k]  # pylint: disable=eval-used
-        self.d = dict(zip(*[k1, v]))
-
-        return response['final_data']
+        records = self._load_local_games()
+        if not records:
+            return None
+        return records
 
     def get_stacked_bar_data2(self, p_name, p_value, chartType, last_stage='All', last_action='All',
                               my_computer_only=False):
-
-        computer_name = COMPUTER_NAME if my_computer_only else 'All'
-
-        response = requests.post(URL + "get_stacked_bar_data2",
-                                 params={'p_value': p_value, 'chartType': chartType,
-                                         'last_stage': last_stage,
-                                         'last_action': last_action,
-                                         'computer_name': computer_name}).json()
-
-        return pd.DataFrame(json.loads(response))
+        records = self._load_local_games()
+        if not records:
+            return pd.DataFrame()
+        return pd.DataFrame(records)
 
     def get_histrogram_data(self, p_name, p_value, game_stage, decision, my_computer_only=False):
-
-        response = requests.post(URL + "get_histrogram_data", params={'p_value': p_value, 'game_stage': game_stage,
-                                                                      'decision': decision}).json()
-
-        return [response['equity_win'], response['equity_loss']]
+        return [0, 0]
 
     def get_game_count(self, strategy, my_computer_only=False):
-        computer_name = COMPUTER_NAME if my_computer_only else 'All'
-        response = requests.post(
-            URL + "get_game_count", params={'strategy': strategy,
-                                            'computer_name': computer_name}).json()
-        return response
+        records = self._load_local_games(strategy=strategy)
+        return len(records)
 
     def get_strategy_return(self, strategy, days, my_computer_only=False):
-        computer_name = COMPUTER_NAME if my_computer_only else 'All'
-        response = requests.post(URL + "get_strategy_return", params={'strategy': strategy,
-                                                                      'days': days,
-                                                                      'computer_name': computer_name}).json()
-        return round(float(response), 2)
+        records = self._load_local_games(strategy=strategy)
+        if not records:
+            return 0.0
+        total = sum(float(r.get('FinalFundsChange', 0)) for r in records)
+        return round(total, 2)
 
     def get_fundschange_chart(self, strategy, my_computer_only=False):
-        computer_name = COMPUTER_NAME if my_computer_only else 'All'
-        response = requests.post(
-            URL + "get_fundschange_chart", params={'strategy': strategy,
-                                                   'computer_name': computer_name}).json()
-        return response
+        records = self._load_local_games(strategy=strategy)
+        if not records:
+            return []
+        return [float(r.get('FinalFundsChange', 0)) for r in records]
 
     def get_scatterplot_data(self, p_name, p_value, game_stage, decision):
-        response = requests.post(URL + "get_scatterplot_data", params={'p_name': p_name, 'p_value': p_value,
-                                                                       'game_stage': game_stage,
-                                                                       'decision': decision}).json()
-
-        return [pd.DataFrame(json.loads(response['wins'])), pd.DataFrame(json.loads(response['losses']))]
+        return [pd.DataFrame(), pd.DataFrame()]
 
     def get_worst_games(self, strategy):
-        response = requests.post(
-            URL + "get_worst_games", params={'strategy': strategy}).json()
-        return pd.DataFrame(response)
+        records = self._load_local_games(strategy=strategy)
+        if not records:
+            return pd.DataFrame()
+        return pd.DataFrame(records)

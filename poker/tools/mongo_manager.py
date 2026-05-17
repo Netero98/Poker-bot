@@ -12,7 +12,8 @@ from poker.tools.singleton import Singleton
 
 log = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(get_dir('codebase'), 'data')
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+DATA_DIR = os.path.join(_PROJECT_ROOT, 'data')
 TABLES_DIR = os.path.join(DATA_DIR, 'tables')
 
 
