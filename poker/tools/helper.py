@@ -8,13 +8,11 @@ import pickle
 import socket
 import sys
 import traceback
-import webbrowser
 from collections.abc import Iterable
 from configparser import ConfigParser, ExtendedInterpolation
 from logging import handlers
 
 import pandas as pd
-import requests
 
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     codebase = os.path.abspath(os.path.join(__file__, '..', '..', '..'))
@@ -330,11 +328,3 @@ def _keys_to_tuple(args, kwargs):
         compiled_args.append(k)
         compiled_args.append(v)
     return tuple(compiled_args)
-
-
-def open_payment_link():
-    config = get_config()
-    URL = config.config.get('main', 'db')
-    c = requests.post(URL + "get_internal").json()[0]
-    payment_link = c['payment_link']
-    webbrowser.open(payment_link, new=1)
