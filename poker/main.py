@@ -1,5 +1,6 @@
 import datetime
 import logging.handlers
+import os
 import sys
 import threading
 import time
@@ -28,7 +29,6 @@ from poker.tools.game_logger import GameLogger
 from poker.tools.helper import init_logger, get_config, get_dir
 from poker.tools.mongo_manager import MongoManager
 from poker.tools.mouse_mover import MouseMoverTableBased
-from poker.tools.update_checker import UpdateChecker
 
 # pylint: disable=no-member,simplifiable-if-expression,protected-access,line-too-long,use-fstring-for-concatenation,refactoring:missing-module-dosctring,
 
@@ -281,13 +281,6 @@ def run_poker():
     log = logging.getLogger("")
     log.info("Initializing program")
 
-    # Back up the reference to the exceptionhook
-    sys._excepthook = sys.excepthook
-    log.info("Check for auto-update")
-    updater = UpdateChecker()
-    updater.check_update(version)
-    log.info(f"Lastest version already installed: {version}")
-
     def exception_hook(exctype, value, traceback):
         # Print the error and traceback
         logger = logging.getLogger('main')
@@ -305,7 +298,7 @@ def run_poker():
     app = QtWidgets.QApplication(sys.argv)
     global ui  # pylint: disable=global-statement
     ui = UiPokerbot()
-    ui.setWindowIcon(QtGui.QIcon('gui/ui/icon.ico'))
+    ui.setWindowIcon(QtGui.QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gui', 'ui', 'icon.ico')))
 
     gui_signals = UIActionAndSignals(ui)
 

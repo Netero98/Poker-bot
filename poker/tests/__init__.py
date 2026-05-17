@@ -14,7 +14,6 @@ from poker.tools.game_logger import GameLogger
 from poker.tools.helper import COMPUTER_NAME, get_config
 from poker.tools.mongo_manager import MongoManager
 from poker.tools.strategy_handler import StrategyHandler
-from poker.tools.update_checker import UpdateChecker
 
 config = get_config()
 URL = config.config.get('main', 'db')
@@ -32,7 +31,6 @@ def init_table(file, round_number=0, strategy='Default1', table_scraper_name='Of
     p = StrategyHandler()
     p.read_strategy(strategy_override=strategy)
     h = main.History()
-    u = UpdateChecker()
     c = requests.post(URL + "get_internal").json()[0]
     preflop_url = c['preflop_url']
     # preflop_url = 'decisionmaker/preflop.xlsx'
