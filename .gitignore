@@ -1,5 +1,7 @@
 ﻿/.idea
+.logs/
 *.log
+*.pid
 *.xml
 /.vs/Poker/v14
 *.

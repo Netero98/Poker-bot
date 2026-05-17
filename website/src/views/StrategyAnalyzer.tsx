@@ -1,4 +1,4 @@
-import { CircularProgress, FormControl, InputLabel, MenuItem, Select } from '@material-ui/core';
+import { CircularProgress, FormControl, InputLabel, MenuItem, Select } from '@mui/material';
 import axios from 'axios';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React, { useEffect, useState } from 'react';
