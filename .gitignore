@@ -236,3 +236,4 @@ Poker.code-workspace
 *.spec
 *.ipynb
 *.dmg
+data

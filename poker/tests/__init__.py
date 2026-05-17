@@ -1,42 +1,33 @@
 import inspect
-import json
 import logging
 import os
 import sys
 from unittest.mock import MagicMock
 
 import pandas as pd
-import requests
 from PIL import Image
 
 from poker import main
-from poker.tools.game_logger import GameLogger
-from poker.tools.helper import COMPUTER_NAME, get_config
 from poker.tools.mongo_manager import MongoManager
 from poker.tools.strategy_handler import StrategyHandler
-
-config = get_config()
-URL = config.config.get('main', 'db')
 
 currentdir = os.path.dirname(os.path.abspath(
     inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)
 
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data')
+PREFLOP_PATH = os.path.join(DATA_DIR, 'decisionmaker', 'preflop.xlsx')
 
-def init_table(file, round_number=0, strategy='Default1', table_scraper_name='Official GGPoker 6player'):
-    # LOG_FILENAME = 'testing.log'
+
+def init_table(file, round_number=0, strategy='Official 1', table_scraper_name='Official GGPoker 6player'):
     logger = logging.getLogger('tester')
     gui_signals = MagicMock()
     p = StrategyHandler()
     p.read_strategy(strategy_override=strategy)
     h = main.History()
-    c = requests.post(URL + "get_internal").json()[0]
-    preflop_url = c['preflop_url']
-    # preflop_url = 'decisionmaker/preflop.xlsx'
-    h.preflop_sheet = pd.read_excel(
-        preflop_url, sheet_name=None, engine='openpyxl')
-    game_logger = GameLogger()
+    h.preflop_sheet = pd.read_excel(PREFLOP_PATH, sheet_name=None, engine='openpyxl')
+    game_logger = MagicMock()
     mongo = MongoManager()
     table_dict = mongo.get_table(table_scraper_name)
     t = main.TableScreenBased(p, {}, gui_signals, game_logger, 0.0)

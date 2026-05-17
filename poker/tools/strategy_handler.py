@@ -1,20 +1,20 @@
 import datetime
 import json
 import logging
+import os
 import re
-import time
 
-import requests
-
-from poker.tools.helper import COMPUTER_NAME, get_config
-
-config = get_config()
-URL = config.config.get('main', 'db')
+from poker.tools.helper import get_config
+from poker.tools.singleton import Singleton
 
 log = logging.getLogger(__name__)
 
+DATA_DIR = os.path.join(get_dir('codebase'), 'data')
+TABLES_DIR = os.path.join(DATA_DIR, 'tables')
+STRATEGIES_DIR = os.path.join(DATA_DIR, 'strategies')
 
-class StrategyHandler:
+
+class StrategyHandler(metaclass=Singleton):
     def __init__(self):
         self.current_strategy = None
         self.selected_strategy = None
@@ -22,13 +22,14 @@ class StrategyHandler:
         self.modified = False
 
     def get_playable_strategy_list(self):
-        config = get_config()
-        login = config.config.get('main', 'login')
-        password = config.config.get('main', 'password')
-        lst = requests.post(URL + "get_playable_strategy_list", params={"login": login,
-                                                                        "password": password,
-                                                                        "computer_name": COMPUTER_NAME}).json()
-        return lst
+        strategies = []
+        if not os.path.exists(STRATEGIES_DIR):
+            return strategies
+        for fname in os.listdir(STRATEGIES_DIR):
+            if fname.startswith('strategy_') and fname.endswith('.json'):
+                name = fname[len('strategy_'):-len('.json')].replace('_', ' ')
+                strategies.append(name)
+        return strategies
 
     def check_defaults(self):
         if 'initialFunds2' not in self.selected_strategy:
@@ -117,32 +118,44 @@ class StrategyHandler:
 
     def read_strategy(self, strategy_override=''):
         config = get_config()
-        login = config.config.get('main', 'login')
-        password = config.config.get('main', 'password')
         last_strategy = config.config.get('main', 'last_strategy')
         self.current_strategy = last_strategy if strategy_override == '' else strategy_override
-        try:
-            output = requests.post(
-                URL + "get_strategy", params={'name': self.current_strategy,
-                                              "login": login,
-                                              "password": password}).json()[0]
-        except:
-            log.error(f"This Strategy is not available for this user: {login}")
-            time.sleep(1)
-            output = requests.post(URL + "get_strategy",
-                                   params={'name': 'Default',
-                                           "login": 'guest',
-                                           "password": 'guest'}).json()[0]
-        self.selected_strategy = output
+        safe_name = self.current_strategy.replace(' ', '_')
 
+        fpath = os.path.join(STRATEGIES_DIR, f'strategy_{safe_name}.json')
+        if not os.path.exists(fpath):
+            log.error(f"Strategy '{self.current_strategy}' not found locally: {fpath}")
+            fpath = os.path.join(STRATEGIES_DIR, 'strategy_Official_1.json')
+            self.current_strategy = 'Official 1'
+            if not os.path.exists(fpath):
+                raise FileNotFoundError(
+                    f"Default strategy not found. Place strategy JSON files in {STRATEGIES_DIR}")
+
+        with open(fpath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            self.selected_strategy = data[0]
+        else:
+            self.selected_strategy = data
         self.check_defaults()
         return True
 
-    def save_strategy_genetic_algorithm(self):
-        config = get_config()
-        login = config.config.get('main', 'login')
-        password = config.config.get('main', 'password')
+    def save_strategy(self, strategy_dict):
+        os.makedirs(STRATEGIES_DIR, exist_ok=True)
+        name = strategy_dict.get('Strategy', 'custom')
+        safe_name = name.replace(' ', '_')
+        fpath = os.path.join(STRATEGIES_DIR, f'strategy_{safe_name}.json')
+        with open(fpath, 'w', encoding='utf-8') as f:
+            json.dump([strategy_dict], f, indent=2, default=str)
+        log.info(f"Strategy saved to {fpath}")
+        return True
 
+    def update_strategy(self, strategy):
+        if '_id' in strategy:
+            del strategy['_id']
+        return self.save_strategy(strategy)
+
+    def save_strategy_genetic_algorithm(self):
         m = re.search(r'([a-zA-Z?-_]+)([0-9]+)', self.current_strategy)
         stringPart = m.group(1)
         numberPart = int(m.group(2))
@@ -151,46 +164,7 @@ class StrategyHandler:
         self.new_strategy_name = stringPart + str(numberPart) + suffix
         self.selected_strategy['Strategy'] = self.new_strategy_name
         self.current_strategy = self.new_strategy_name
-        del self.selected_strategy['_id']
-        response = requests.post(
-            URL + "save_strategy", json={'strategy': json.dumps(self.selected_strategy),
-                                         'login': login, 'password': password}).json()
-        if response:
-            log.info("Saved")
-        else:
-            log.error("Not allowed to write strategies")
-
-    def save_strategy(self, strategy_dict):
-        config = get_config()
-        login = config.config.get('main', 'login')
-        password = config.config.get('main', 'password')
-        response = requests.post(
-            URL + "save_strategy", json={'strategy': json.dumps(strategy_dict),
-                                         'login': login, 'password': password}).json()
-        if response:
-            log.info("Saved")
-            return True
-        else:
-            log.error("Not allowed to write strategies")
-            return False
-
-    def update_strategy(self, strategy):
-        try:
-            del strategy['_id']
-        except:
-            pass
-        login = config.config.get('main', 'login')
-        password = config.config.get('main', 'password')
-        response = requests.post(
-            URL + "update_strategy", json={'name': strategy['Strategy'],
-                                           'strategy': json.dumps(strategy),
-                                           'login': login, 'password': password}).json()
-        if response:
-            log.info("Saved")
-            return True
-        else:
-            log.error("Not allowed to write strategies")
-            return False
+        return self.save_strategy(self.selected_strategy)
 
     def modify_strategy(self, elementName, change):
         self.selected_strategy[elementName] = str(

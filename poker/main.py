@@ -44,11 +44,10 @@ ui = None
 
 
 class ThreadManager(threading.Thread):
-    def __init__(self, threadID, name, counter, gui_signals, updater):
+    def __init__(self, threadID, name, counter, gui_signals):
         threading.Thread.__init__(self)
         self.threadID = threadID
         self.gui_signals = gui_signals
-        self.updater = updater
         self.name = name
         self.counter = counter
         self.loger = logging.getLogger('main')
@@ -122,11 +121,8 @@ class ThreadManager(threading.Thread):
     def run(self):
         log = logging.getLogger(__name__)
         history = History()
-        preflop_url, preflop_url_backup = self.updater.get_preflop_sheet_url()
-        try:
-            history.preflop_sheet = pd.read_excel(preflop_url, sheet_name=None, engine='openpyxl')
-        except:
-            history.preflop_sheet = pd.read_excel(preflop_url_backup, sheet_name=None, engine='openpyxl')
+        preflop_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'decisionmaker', 'preflop.xlsx')
+        history.preflop_sheet = pd.read_excel(preflop_path, sheet_name=None, engine='openpyxl')
 
 
         strategy = StrategyHandler()
@@ -302,7 +298,7 @@ def run_poker():
 
     gui_signals = UIActionAndSignals(ui)
 
-    t1 = ThreadManager(1, "Thread-1", 1, gui_signals, updater)
+    t1 = ThreadManager(1, "Thread-1", 1, gui_signals)
     t1.start()
     
     t2 = threading.Thread(target=local_restapi)
