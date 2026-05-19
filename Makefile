@@ -1,5 +1,6 @@
 .PHONY: help init install install-be install-fe status up down \
-        run run-api dev-fe build-fe lint lint-be lint-fe test test-be clean clean-be clean-fe
+        run run-api dev-fe build-fe lint lint-be lint-fe \
+        test test-be test-one clean clean-be clean-fe
 
 PYTHON   ?= python3
 VENV     ?= .venv
@@ -30,6 +31,7 @@ help:
 	@echo "  Тестирование и линтинг:"
 	@echo "    test             — запустить все тесты"
 	@echo "    test-be          — запустить Python-тесты"
+	@echo "    test-one TEST=…  — запустить конкретный тестовый файл (пример: make test-one TEST=poker/tests/test_decision.py)"
 	@echo "    lint             — запустить все линтеры"
 	@echo "    lint-be          — запустить pylint"
 	@echo "    lint-fe          — запустить eslint для frontend"
@@ -96,6 +98,10 @@ test: test-be
 
 test-be:
 	$(VENV)/bin/pytest -ra -s poker/tests/
+
+test-one:
+	@if [ -z "$(TEST)" ]; then echo "Ошибка: укажи TEST. Пример: make test-one TEST=poker/tests/test_decision.py"; exit 1; fi
+	$(VENV)/bin/pytest -ra -s "$(TEST)"
 
 lint: lint-be lint-fe
 
